@@ -2,7 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#1e1e1e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Mortar Calc">
+<link rel="manifest" href="manifest.json">
 <title>WARDOGS Mortar Calculator</title>
 <style>
   * {
@@ -231,6 +237,58 @@
     color: #888;
     text-align: center;
     margin-top: 12px;
+  }
+
+  /* ---- Mobile responsiveness ---- */
+  @media (max-width: 700px) {
+    body {
+      padding: 15px 12px;
+      gap: 15px;
+    }
+
+    .card,
+    .panel {
+      width: 100%;
+      max-width: 100%;
+      padding: 18px;
+    }
+
+    h1 {
+      font-size: 18px;
+      margin-bottom: 18px;
+    }
+
+    .range-value {
+      font-size: 34px;
+    }
+
+    /* Buttons go full-width and stack nicely on narrow screens. */
+    .buttons {
+      gap: 8px;
+    }
+
+    .buttons button {
+      flex: 1 1 auto;
+      min-width: 45%;
+    }
+
+    .shot-list {
+      max-height: none;
+    }
+
+    /* Larger tap target for deleting a shot on touch screens. */
+    .shot-delete {
+      font-size: 20px;
+      padding: 4px 10px;
+    }
+  }
+
+  /* Prevent iOS from zooming when focusing inputs (needs >=16px font). */
+  @media (max-width: 700px) {
+    input[type="text"],
+    textarea {
+      font-size: 16px;
+    }
   }
 </style>
 </head>
@@ -522,6 +580,15 @@
 
   // Initial and ongoing rendering is handled by the Firebase onValue
   // listener above, so no manual initial render is needed here.
+
+  // ---- PWA: register service worker so the app is installable ----
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("service-worker.js").then(function () {
+      console.log("[WARDOGS] Service worker registered");
+    }).catch(function (err) {
+      console.log("[WARDOGS] Service worker registration failed:", err);
+    });
+  }
 </script>
 </body>
 </html>
