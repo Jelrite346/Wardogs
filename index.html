@@ -268,8 +268,36 @@
     <div class="hint">Click a saved shot to load its coordinates.</div>
   </div>
 
-<script>
-  const STORAGE_KEY = "wardogs_saved_shots";
+<script type="module">
+  // ---- Firebase setup ----
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import {
+    getDatabase,
+    ref,
+    push,
+    remove,
+    onValue,
+    query,
+    orderByChild
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+  // ==============================================================
+  // PASTE YOUR FIREBASE CONFIG HERE
+  // Firebase Console -> Project settings -> "Your apps" -> config
+  // ==============================================================
+  const firebaseConfig = {
+    apiKey: "AIzaSyAOPqU37qHRwMEZPqsU3iUL4xCaOID2zqw",
+    authDomain: "wardogs-590f4.firebaseapp.com",
+    databaseURL: "https://wardogs-590f4-default-rtdb.firebaseio.com",
+    projectId: "wardogs-590f4",
+    storageBucket: "wardogs-590f4.firebasestorage.app",
+    messagingSenderId: "194004752044",
+    appId: "1:194004752044:web:9c70cd04a4cc6fcd047109"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+  const shotsRef = ref(db, "shots");
 
   const mortarEl = document.getElementById("mortar");
   const targetEl = document.getElementById("target");
@@ -335,26 +363,16 @@
     targetEl.focus();
   }
 
-  // ---- Saved shots handling ----
+  // ---- Saved shots handling (shared via Firebase) ----
 
-  function loadShots() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch (e) {
-      return [];
-    }
-  }
-
-  function saveShots(shots) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(shots));
-  }
-
-  function renderShots() {
-    const shots = loadShots();
+  // Renders the list from a Firebase snapshot object. Each shot is stored
+  // under a unique key, which we keep so deletes target the right record.
+  function renderShots(shotsObj) {
     shotListEl.innerHTML = "";
 
-    if (shots.length === 0) {
+    const keys = shotsObj ? Object.keys(shotsObj) : [];
+
+    if (keys.length === 0) {
       const li = document.createElement("li");
       li.className = "empty";
       li.textContent = "No saved shots yet.";
@@ -362,7 +380,14 @@
       return;
     }
 
-    shots.forEach(function (shot, index) {
+    // Newest first (higher createdAt at the top).
+    keys.sort(function (a, b) {
+      return (shotsObj[b].createdAt || 0) - (shotsObj[a].createdAt || 0);
+    });
+
+    keys.forEach(function (key) {
+      const shot = shotsObj[key];
+
       const li = document.createElement("li");
       li.className = "shot";
 
@@ -379,7 +404,7 @@
       del.title = "Delete this shot";
       del.addEventListener("click", function (e) {
         e.stopPropagation();
-        deleteShot(index);
+        deleteShot(key);
       });
 
       top.appendChild(range);
@@ -436,29 +461,37 @@
 
     errorEl.textContent = "";
 
-    const shots = loadShots();
-    shots.unshift({
+    // Push to Firebase. The realtime listener re-renders for everyone,
+    // including this page, so no manual render call is needed here.
+    push(shotsRef, {
       target: target,
       range: range,
-      note: noteEl.value.trim()
+      note: noteEl.value.trim(),
+      createdAt: Date.now()
+    }).catch(function (err) {
+      errorEl.textContent = "Could not save shot: " + err.message;
     });
-    saveShots(shots);
-    renderShots();
   }
 
-  function deleteShot(index) {
-    const shots = loadShots();
-    shots.splice(index, 1);
-    saveShots(shots);
-    renderShots();
+  function deleteShot(key) {
+    remove(ref(db, "shots/" + key)).catch(function (err) {
+      errorEl.textContent = "Could not delete shot: " + err.message;
+    });
   }
 
   function clearAllShots() {
-    if (confirm("Clear all saved shots?")) {
-      saveShots([]);
-      renderShots();
+    if (confirm("Clear all saved shots for everyone?")) {
+      remove(shotsRef).catch(function (err) {
+        errorEl.textContent = "Could not clear shots: " + err.message;
+      });
     }
   }
+
+  // Live subscription: fires now with current data and again on any change
+  // made by anyone, so all open pages stay in sync automatically.
+  onValue(query(shotsRef, orderByChild("createdAt")), function (snapshot) {
+    renderShots(snapshot.val());
+  });
 
   // ---- Wire up controls ----
 
@@ -474,8 +507,8 @@
     }
   });
 
-  // Initial render of any previously saved shots.
-  renderShots();
+  // Initial and ongoing rendering is handled by the Firebase onValue
+  // listener above, so no manual initial render is needed here.
 </script>
 </body>
 </html>
