@@ -13,11 +13,14 @@
     margin: 0;
     min-height: 100vh;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
+    gap: 20px;
+    padding: 30px 20px;
     background: #1e1e1e;
     font-family: "Segoe UI", Tahoma, sans-serif;
     color: #f0f0f0;
+    flex-wrap: wrap;
   }
 
   .card {
@@ -43,7 +46,8 @@
     font-size: 14px;
   }
 
-  input[type="text"] {
+  input[type="text"],
+  textarea {
     width: 100%;
     padding: 10px;
     font-size: 16px;
@@ -52,9 +56,12 @@
     background: #1e1e1e;
     color: #f0f0f0;
     margin-bottom: 15px;
+    font-family: inherit;
+    resize: vertical;
   }
 
-  input[type="text"]:focus {
+  input[type="text"]:focus,
+  textarea:focus {
     outline: none;
     border-color: #4a90d9;
   }
@@ -64,6 +71,7 @@
     justify-content: center;
     gap: 10px;
     margin-bottom: 10px;
+    flex-wrap: wrap;
   }
 
   button {
@@ -80,8 +88,17 @@
     background: #555;
   }
 
+  button.save {
+    background: #3fa66a;
+  }
+
   button:hover {
     filter: brightness(1.1);
+  }
+
+  button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .range-title {
@@ -110,6 +127,111 @@
     min-height: 18px;
     margin-top: 8px;
   }
+
+  /* ---- Saved shots side panel ---- */
+
+  .panel {
+    width: 340px;
+    max-width: 95vw;
+    background: #2b2b2b;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 15px;
+  }
+
+  .panel-header h2 {
+    font-size: 18px;
+    margin: 0;
+  }
+
+  .panel-header button {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  .shot-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 520px;
+    overflow-y: auto;
+  }
+
+  .shot {
+    background: #1e1e1e;
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 12px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+
+  .shot:hover {
+    border-color: #4a90d9;
+  }
+
+  .shot-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .shot-range {
+    font-size: 20px;
+    font-weight: bold;
+    color: #6fb3f0;
+  }
+
+  .shot-delete {
+    background: transparent;
+    color: #e06c6c;
+    border: none;
+    font-size: 16px;
+    padding: 2px 6px;
+    cursor: pointer;
+  }
+
+  .shot-coords {
+    font-size: 12px;
+    color: #aaaaaa;
+    margin-top: 4px;
+    word-break: break-word;
+  }
+
+  .shot-note {
+    font-size: 13px;
+    color: #e0e0e0;
+    margin-top: 6px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .empty {
+    color: #888;
+    font-size: 14px;
+    text-align: center;
+    padding: 20px 0;
+  }
+
+  .hint {
+    font-size: 12px;
+    color: #888;
+    text-align: center;
+    margin-top: 12px;
+  }
 </style>
 </head>
 <body>
@@ -122,8 +244,12 @@
     <label for="target">Target Position (B)</label>
     <input type="text" id="target" placeholder="x105.20, y140.00">
 
+    <label for="note">Note (optional)</label>
+    <textarea id="note" rows="2" placeholder="e.g. enemy bunker, ridge line"></textarea>
+
     <div class="buttons">
       <button id="calc">Calculate</button>
+      <button id="save" class="save">Save Shot</button>
       <button id="clear" class="clear">Clear</button>
     </div>
 
@@ -133,12 +259,28 @@
     <div class="error" id="error"></div>
   </div>
 
+  <div class="panel">
+    <div class="panel-header">
+      <h2>Saved Shots</h2>
+      <button id="clearAll" class="clear">Clear All</button>
+    </div>
+    <ul class="shot-list" id="shotList"></ul>
+    <div class="hint">Click a saved shot to load its coordinates.</div>
+  </div>
+
 <script>
+  const STORAGE_KEY = "wardogs_saved_shots";
+
   const mortarEl = document.getElementById("mortar");
   const targetEl = document.getElementById("target");
+  const noteEl = document.getElementById("note");
   const rangeEl = document.getElementById("range");
   const detailsEl = document.getElementById("details");
   const errorEl = document.getElementById("error");
+  const shotListEl = document.getElementById("shotList");
+
+  // Holds the most recent successful calculation so "Save Shot" can use it.
+  let lastResult = null;
 
   function parseCoordinates(coords) {
     const match = coords.match(
@@ -169,31 +311,171 @@
       detailsEl.textContent =
         "\u0394X: " + dx.toFixed(2) + "    \u0394Y: " + dy.toFixed(2);
       errorEl.textContent = "";
+
+      lastResult = {
+        target: targetEl.value.trim(),
+        range: distance.toFixed(0) + " m"
+      };
     } catch (err) {
       rangeEl.textContent = "---";
       detailsEl.textContent = "";
       errorEl.textContent = err.message;
+      lastResult = null;
     }
   }
 
+  // Clears the target and note but keeps the mortar position in place.
   function clearFields() {
-    mortarEl.value = "";
     targetEl.value = "";
+    noteEl.value = "";
     rangeEl.textContent = "---";
     detailsEl.textContent = "";
     errorEl.textContent = "";
-    mortarEl.focus();
+    lastResult = null;
+    targetEl.focus();
   }
 
-  document.getElementById("calc").addEventListener("click", calculateDistance);
-  document.getElementById("clear").addEventListener("click", clearFields);
+  // ---- Saved shots handling ----
 
-  // Pressing Enter calculates
+  function loadShots() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveShots(shots) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(shots));
+  }
+
+  function renderShots() {
+    const shots = loadShots();
+    shotListEl.innerHTML = "";
+
+    if (shots.length === 0) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = "No saved shots yet.";
+      shotListEl.appendChild(li);
+      return;
+    }
+
+    shots.forEach(function (shot, index) {
+      const li = document.createElement("li");
+      li.className = "shot";
+
+      const top = document.createElement("div");
+      top.className = "shot-top";
+
+      const range = document.createElement("span");
+      range.className = "shot-range";
+      range.textContent = shot.range;
+
+      const del = document.createElement("button");
+      del.className = "shot-delete";
+      del.textContent = "\u2715";
+      del.title = "Delete this shot";
+      del.addEventListener("click", function (e) {
+        e.stopPropagation();
+        deleteShot(index);
+      });
+
+      top.appendChild(range);
+      top.appendChild(del);
+
+      const coords = document.createElement("div");
+      coords.className = "shot-coords";
+      coords.textContent = "Target: " + shot.target;
+
+      li.appendChild(top);
+      li.appendChild(coords);
+
+      if (shot.note) {
+        const note = document.createElement("div");
+        note.className = "shot-note";
+        note.textContent = shot.note;
+        li.appendChild(note);
+      }
+
+      // Quick select: clicking the shot loads its target coordinate.
+      // The current mortar position is left untouched.
+      li.addEventListener("click", function () {
+        targetEl.value = shot.target;
+        noteEl.value = shot.note || "";
+        calculateDistance();
+      });
+
+      shotListEl.appendChild(li);
+    });
+  }
+
+  function saveCurrentShot() {
+    // Saving only requires a valid target. Notes are optional, and the
+    // mortar position is not needed to save a target.
+    let target;
+    try {
+      parseCoordinates(targetEl.value);
+      target = targetEl.value.trim();
+    } catch (err) {
+      errorEl.textContent = "Enter a valid target to save. " + err.message;
+      return;
+    }
+
+    // Compute the range if a mortar position is available, otherwise leave
+    // it blank so a target can be stored on its own.
+    let range = "\u2014";
+    try {
+      const a = parseCoordinates(mortarEl.value);
+      const b = parseCoordinates(targetEl.value);
+      range = (Math.hypot(b.x - a.x, b.y - a.y) * 100).toFixed(0) + " m";
+    } catch (err) {
+      // No valid mortar position; store the target without a range.
+    }
+
+    errorEl.textContent = "";
+
+    const shots = loadShots();
+    shots.unshift({
+      target: target,
+      range: range,
+      note: noteEl.value.trim()
+    });
+    saveShots(shots);
+    renderShots();
+  }
+
+  function deleteShot(index) {
+    const shots = loadShots();
+    shots.splice(index, 1);
+    saveShots(shots);
+    renderShots();
+  }
+
+  function clearAllShots() {
+    if (confirm("Clear all saved shots?")) {
+      saveShots([]);
+      renderShots();
+    }
+  }
+
+  // ---- Wire up controls ----
+
+  document.getElementById("calc").addEventListener("click", calculateDistance);
+  document.getElementById("save").addEventListener("click", saveCurrentShot);
+  document.getElementById("clear").addEventListener("click", clearFields);
+  document.getElementById("clearAll").addEventListener("click", clearAllShots);
+
+  // Pressing Enter calculates.
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") {
       calculateDistance();
     }
   });
+
+  // Initial render of any previously saved shots.
+  renderShots();
 </script>
 </body>
 </html>
