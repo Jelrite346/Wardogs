@@ -74,6 +74,33 @@
     border-color: #4a90d9;
   }
 
+  /* ---- Split X / Y coordinate inputs ---- */
+
+  .coord-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+  }
+
+  .coord-field {
+    flex: 1 1 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .coord-field .axis {
+    font-weight: bold;
+    color: #6fb3f0;
+    font-size: 16px;
+  }
+
+  /* The X/Y inputs share the base input styling but drop the row's own
+     bottom margin since the .coord-row already provides spacing. */
+  .coord-field input[type="text"] {
+    margin-bottom: 0;
+  }
+
   .buttons {
     display: flex;
     justify-content: center;
@@ -98,6 +125,10 @@
 
   button.save {
     background: #3fa66a;
+  }
+
+  button.danger {
+    background: #b3452f;
   }
 
   button:hover {
@@ -420,18 +451,37 @@
       <span class="mode-label" id="labelOffline">Offline</span>
     </div>
 
-    <label for="mortar">Mortar Position (A)</label>
-    <input type="text" id="mortar" placeholder="x93.56, y121.11" autofocus>
+    <label>Mortar Position (A)</label>
+    <div class="coord-row">
+      <div class="coord-field">
+        <span class="axis">X</span>
+        <input type="text" id="mortarX" inputmode="decimal" placeholder="93.56" autofocus>
+      </div>
+      <div class="coord-field">
+        <span class="axis">Y</span>
+        <input type="text" id="mortarY" inputmode="decimal" placeholder="121.11">
+      </div>
+    </div>
 
     <div class="buttons">
       <button id="saveMortar" class="save">Save Mortar</button>
-      <button id="clearMortars" class="clear">Clear Mortars</button>
+      <button id="clearMortarInputs" class="clear">Clear Inputs</button>
+      <button id="clearMortars" class="danger">Clear Saved</button>
     </div>
 
     <div class="mortar-chips" id="mortarList"></div>
 
-    <label for="target">Target Position (B)</label>
-    <input type="text" id="target" placeholder="x105.20, y140.00">
+    <label>Target Position (B)</label>
+    <div class="coord-row">
+      <div class="coord-field">
+        <span class="axis">X</span>
+        <input type="text" id="targetX" inputmode="decimal" placeholder="105.20">
+      </div>
+      <div class="coord-field">
+        <span class="axis">Y</span>
+        <input type="text" id="targetY" inputmode="decimal" placeholder="140.00">
+      </div>
+    </div>
 
     <label for="note">Note (optional)</label>
     <textarea id="note" rows="2" placeholder="e.g. enemy bunker, ridge line"></textarea>
@@ -496,8 +546,10 @@
     alert("Firebase failed to start: " + e.message);
   }
 
-  const mortarEl = document.getElementById("mortar");
-  const targetEl = document.getElementById("target");
+  const mortarXEl = document.getElementById("mortarX");
+  const mortarYEl = document.getElementById("mortarY");
+  const targetXEl = document.getElementById("targetX");
+  const targetYEl = document.getElementById("targetY");
   const noteEl = document.getElementById("note");
   const rangeEl = document.getElementById("range");
   const detailsEl = document.getElementById("details");
@@ -552,25 +604,63 @@
     return "loc-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
   }
 
-  function parseCoordinates(coords) {
-    const match = coords.match(
-      /\s*x\s*(-?\d+(?:\.\d+)?)\s*,?\s*y\s*(-?\d+(?:\.\d+)?)/i
-    );
+  // Reads a coordinate from a pair of X/Y input boxes. Accepts a bare
+  // number in each box (e.g. "93.56"), tolerating a leading x/y and
+  // surrounding whitespace so pasted values still work.
+  function readCoordFields(xEl, yEl) {
+    const xRaw = xEl.value.trim().replace(/^x/i, "").trim();
+    const yRaw = yEl.value.trim().replace(/^y/i, "").trim();
 
-    if (!match) {
-      throw new Error("Use format: x93.56, y121.11");
+    const numPattern = /^-?\d+(?:\.\d+)?$/;
+    if (!numPattern.test(xRaw) || !numPattern.test(yRaw)) {
+      throw new Error("Enter numbers for both X and Y.");
     }
 
     return {
-      x: parseFloat(match[1]),
-      y: parseFloat(match[2])
+      x: parseFloat(xRaw),
+      y: parseFloat(yRaw)
     };
+  }
+
+  // Parses a stored coordinate string like "x93.56, y121.11". Used only for
+  // loading older saved records that predate the split X/Y fields.
+  function parseCoordinateString(coords) {
+    const match = String(coords).match(
+      /\s*x\s*(-?\d+(?:\.\d+)?)\s*,?\s*y\s*(-?\d+(?:\.\d+)?)/i
+    );
+    if (!match) {
+      return null;
+    }
+    return { x: parseFloat(match[1]), y: parseFloat(match[2]) };
+  }
+
+  // Builds the display string stored on a record and shown in the lists.
+  function formatCoord(x, y) {
+    return "x" + x + ", y" + y;
+  }
+
+  // Puts a coordinate (from x/y numbers or an older string) into a pair of
+  // X/Y input boxes.
+  function fillCoordFields(xEl, yEl, record, stringFallback) {
+    let x = record && typeof record.x === "number" ? record.x : null;
+    let y = record && typeof record.y === "number" ? record.y : null;
+
+    if ((x === null || y === null) && stringFallback) {
+      const parsed = parseCoordinateString(stringFallback);
+      if (parsed) {
+        x = parsed.x;
+        y = parsed.y;
+      }
+    }
+
+    xEl.value = x === null ? "" : x;
+    yEl.value = y === null ? "" : y;
   }
 
   function calculateDistance() {
     try {
-      const a = parseCoordinates(mortarEl.value);
-      const b = parseCoordinates(targetEl.value);
+      const a = readCoordFields(mortarXEl, mortarYEl);
+      const b = readCoordFields(targetXEl, targetYEl);
 
       const dx = b.x - a.x;
       const dy = b.y - a.y;
@@ -583,7 +673,7 @@
       errorEl.textContent = "";
 
       lastResult = {
-        target: targetEl.value.trim(),
+        target: formatCoord(b.x, b.y),
         range: distance.toFixed(0) + " m"
       };
     } catch (err) {
@@ -596,13 +686,23 @@
 
   // Clears the target and note but keeps the mortar position in place.
   function clearFields() {
-    targetEl.value = "";
+    targetXEl.value = "";
+    targetYEl.value = "";
     noteEl.value = "";
     rangeEl.textContent = "---";
     detailsEl.textContent = "";
     errorEl.textContent = "";
     lastResult = null;
-    targetEl.focus();
+    targetXEl.focus();
+  }
+
+  // Empties only the mortar X/Y input boxes. Saved mortar positions and the
+  // target fields are left untouched.
+  function clearMortarInputs() {
+    mortarXEl.value = "";
+    mortarYEl.value = "";
+    errorEl.textContent = "";
+    mortarXEl.focus();
   }
 
   // ---- Saved shots handling (shared via Firebase) ----
@@ -666,10 +766,10 @@
         li.appendChild(note);
       }
 
-      // Quick select: clicking the shot loads its target coordinate.
-      // The current mortar position is left untouched.
+      // Quick select: clicking the shot loads its target coordinate into
+      // the X/Y boxes. The current mortar position is left untouched.
       li.addEventListener("click", function () {
-        targetEl.value = shot.target;
+        fillCoordFields(targetXEl, targetYEl, shot, shot.target);
         noteEl.value = shot.note || "";
         calculateDistance();
       });
@@ -681,10 +781,9 @@
   function saveCurrentShot() {
     // Saving only requires a valid target. Notes are optional, and the
     // mortar position is not needed to save a target.
-    let target;
+    let b;
     try {
-      parseCoordinates(targetEl.value);
-      target = targetEl.value.trim();
+      b = readCoordFields(targetXEl, targetYEl);
     } catch (err) {
       errorEl.textContent = "Enter a valid target to save. " + err.message;
       return;
@@ -694,8 +793,7 @@
     // it blank so a target can be stored on its own.
     let range = "\u2014";
     try {
-      const a = parseCoordinates(mortarEl.value);
-      const b = parseCoordinates(targetEl.value);
+      const a = readCoordFields(mortarXEl, mortarYEl);
       range = (Math.hypot(b.x - a.x, b.y - a.y) * 100).toFixed(0) + " m";
     } catch (err) {
       // No valid mortar position; store the target without a range.
@@ -704,7 +802,9 @@
     errorEl.textContent = "";
 
     const record = {
-      target: target,
+      x: b.x,
+      y: b.y,
+      target: formatCoord(b.x, b.y),
       range: range,
       note: noteEl.value.trim(),
       createdAt: Date.now()
@@ -797,9 +897,10 @@
       chip.appendChild(label);
       chip.appendChild(del);
 
-      // Clicking the chip loads only the mortar position and recalculates.
+      // Clicking the chip loads only the mortar position into the X/Y
+      // boxes and recalculates.
       chip.addEventListener("click", function () {
-        mortarEl.value = mortar.position;
+        fillCoordFields(mortarXEl, mortarYEl, mortar, mortar.position);
         calculateDistance();
       });
 
@@ -808,10 +909,9 @@
   }
 
   function saveCurrentMortar() {
-    let position;
+    let a;
     try {
-      parseCoordinates(mortarEl.value);
-      position = mortarEl.value.trim();
+      a = readCoordFields(mortarXEl, mortarYEl);
     } catch (err) {
       errorEl.textContent = "Enter a valid mortar position to save. " + err.message;
       return;
@@ -820,7 +920,9 @@
     errorEl.textContent = "";
 
     const record = {
-      position: position,
+      x: a.x,
+      y: a.y,
+      position: formatCoord(a.x, a.y),
       createdAt: Date.now()
     };
 
@@ -948,6 +1050,7 @@
   document.getElementById("clear").addEventListener("click", clearFields);
   document.getElementById("clearAll").addEventListener("click", clearAllShots);
   document.getElementById("saveMortar").addEventListener("click", saveCurrentMortar);
+  document.getElementById("clearMortarInputs").addEventListener("click", clearMortarInputs);
   document.getElementById("clearMortars").addEventListener("click", clearAllMortars);
 
   // Pressing Enter calculates.
