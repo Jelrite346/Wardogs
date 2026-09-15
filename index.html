@@ -276,9 +276,7 @@
     ref,
     push,
     remove,
-    onValue,
-    query,
-    orderByChild
+    onValue
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
   // ==============================================================
@@ -295,9 +293,18 @@
     appId: "1:194004752044:web:9c70cd04a4cc6fcd047109"
   };
 
-  const app = initializeApp(firebaseConfig);
-  const db = getDatabase(app);
-  const shotsRef = ref(db, "shots");
+  console.log("[WARDOGS] Script started, initializing Firebase...");
+
+  let app, db, shotsRef;
+  try {
+    app = initializeApp(firebaseConfig);
+    db = getDatabase(app);
+    shotsRef = ref(db, "shots");
+    console.log("[WARDOGS] Firebase initialized OK");
+  } catch (e) {
+    console.error("[WARDOGS] Firebase init FAILED:", e);
+    alert("Firebase failed to start: " + e.message);
+  }
 
   const mortarEl = document.getElementById("mortar");
   const targetEl = document.getElementById("target");
@@ -489,8 +496,14 @@
 
   // Live subscription: fires now with current data and again on any change
   // made by anyone, so all open pages stay in sync automatically.
-  onValue(query(shotsRef, orderByChild("createdAt")), function (snapshot) {
+  // Sorting is done in renderShots (by createdAt), so no orderByChild index
+  // is required here.
+  onValue(shotsRef, function (snapshot) {
+    console.log("[WARDOGS] Data update received:", snapshot.val());
     renderShots(snapshot.val());
+  }, function (err) {
+    console.error("[WARDOGS] Listener error:", err);
+    errorEl.textContent = "Live sync error: " + err.message;
   });
 
   // ---- Wire up controls ----
