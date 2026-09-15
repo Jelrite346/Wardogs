@@ -2,7 +2,7 @@
 // It caches the app shell so the page loads offline. The saved-shots
 // data still requires a network connection since it lives in Firebase.
 
-const CACHE_NAME = "wardogs-mortar-v1";
+const CACHE_NAME = "wardogs-mortar-v2";
 const APP_SHELL = [
   "./",
   "./index.html",
