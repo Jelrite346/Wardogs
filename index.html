@@ -109,6 +109,78 @@
     cursor: not-allowed;
   }
 
+  /* ---- Live / Offline mode toggle ---- */
+
+  .mode-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin: 0 0 22px;
+    font-size: 14px;
+    user-select: none;
+  }
+
+  .mode-toggle .mode-label {
+    color: #888;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    transition: color 0.15s;
+  }
+
+  .mode-toggle .mode-label.active-live {
+    color: #6fb3f0;
+  }
+
+  .mode-toggle .mode-label.active-offline {
+    color: #d0a24a;
+  }
+
+  /* The switch itself: a pill with a sliding knob. */
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 54px;
+    height: 28px;
+    flex: 0 0 auto;
+  }
+
+  .switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .switch .slider {
+    position: absolute;
+    inset: 0;
+    background: #4a90d9;
+    border-radius: 28px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .switch .slider::before {
+    content: "";
+    position: absolute;
+    height: 22px;
+    width: 22px;
+    left: 3px;
+    top: 3px;
+    background: #ffffff;
+    border-radius: 50%;
+    transition: transform 0.2s;
+  }
+
+  /* Checked = Offline mode: knob slides right, pill turns amber. */
+  .switch input:checked + .slider {
+    background: #d0a24a;
+  }
+
+  .switch input:checked + .slider::before {
+    transform: translateX(26px);
+  }
+
   .range-title {
     text-align: center;
     font-size: 16px;
@@ -339,6 +411,15 @@
   <div class="card">
     <h1>WARDOGS MORTAR CALCULATOR</h1>
 
+    <div class="mode-toggle">
+      <span class="mode-label active-live" id="labelLive">Live</span>
+      <label class="switch" title="Toggle between shared Live mode and private Offline mode">
+        <input type="checkbox" id="modeSwitch">
+        <span class="slider"></span>
+      </label>
+      <span class="mode-label" id="labelOffline">Offline</span>
+    </div>
+
     <label for="mortar">Mortar Position (A)</label>
     <input type="text" id="mortar" placeholder="x93.56, y121.11" autofocus>
 
@@ -423,9 +504,53 @@
   const errorEl = document.getElementById("error");
   const shotListEl = document.getElementById("shotList");
   const mortarListEl = document.getElementById("mortarList");
+  const modeSwitchEl = document.getElementById("modeSwitch");
+  const labelLiveEl = document.getElementById("labelLive");
+  const labelOfflineEl = document.getElementById("labelOffline");
 
   // Holds the most recent successful calculation so "Save Shot" can use it.
   let lastResult = null;
+
+  // ==============================================================
+  // Mode handling: "live" (shared via Firebase) vs "offline"
+  // (private to this device via localStorage). The chosen mode is
+  // remembered across refreshes.
+  // ==============================================================
+  const MODE_KEY = "wardogs-mode";
+  const OFFLINE_SHOTS_KEY = "wardogs-offline-shots";
+  const OFFLINE_MORTARS_KEY = "wardogs-offline-mortars";
+
+  let mode = localStorage.getItem(MODE_KEY) === "offline" ? "offline" : "live";
+
+  // Firebase realtime listeners are attached only in live mode. We keep
+  // their unsubscribe handles so we can detach when switching to offline.
+  let unsubShots = null;
+  let unsubMortars = null;
+
+  function isOffline() {
+    return mode === "offline";
+  }
+
+  // ---- localStorage helpers for offline mode ----
+
+  // Data is stored as a keyed object (mirroring the Firebase shape) so the
+  // render functions can be reused unchanged for both modes.
+  function readLocal(key) {
+    try {
+      return JSON.parse(localStorage.getItem(key)) || {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function writeLocal(key, obj) {
+    localStorage.setItem(key, JSON.stringify(obj));
+  }
+
+  // A lightweight unique key for offline records.
+  function localId() {
+    return "loc-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
+  }
 
   function parseCoordinates(coords) {
     const match = coords.match(
@@ -578,25 +703,52 @@
 
     errorEl.textContent = "";
 
-    // Push to Firebase. The realtime listener re-renders for everyone,
-    // including this page, so no manual render call is needed here.
-    push(shotsRef, {
+    const record = {
       target: target,
       range: range,
       note: noteEl.value.trim(),
       createdAt: Date.now()
-    }).catch(function (err) {
+    };
+
+    if (isOffline()) {
+      // Store locally and re-render immediately; no network involved.
+      const shots = readLocal(OFFLINE_SHOTS_KEY);
+      shots[localId()] = record;
+      writeLocal(OFFLINE_SHOTS_KEY, shots);
+      renderShots(shots);
+      return;
+    }
+
+    // Live mode: push to Firebase. The realtime listener re-renders for
+    // everyone, including this page, so no manual render call is needed.
+    push(shotsRef, record).catch(function (err) {
       errorEl.textContent = "Could not save shot: " + err.message;
     });
   }
 
   function deleteShot(key) {
+    if (isOffline()) {
+      const shots = readLocal(OFFLINE_SHOTS_KEY);
+      delete shots[key];
+      writeLocal(OFFLINE_SHOTS_KEY, shots);
+      renderShots(shots);
+      return;
+    }
+
     remove(ref(db, "shots/" + key)).catch(function (err) {
       errorEl.textContent = "Could not delete shot: " + err.message;
     });
   }
 
   function clearAllShots() {
+    if (isOffline()) {
+      if (confirm("Clear all saved shots on this device?")) {
+        writeLocal(OFFLINE_SHOTS_KEY, {});
+        renderShots({});
+      }
+      return;
+    }
+
     if (confirm("Clear all saved shots for everyone?")) {
       remove(shotsRef).catch(function (err) {
         errorEl.textContent = "Could not clear shots: " + err.message;
@@ -667,21 +819,47 @@
 
     errorEl.textContent = "";
 
-    push(mortarsRef, {
+    const record = {
       position: position,
       createdAt: Date.now()
-    }).catch(function (err) {
+    };
+
+    if (isOffline()) {
+      const mortars = readLocal(OFFLINE_MORTARS_KEY);
+      mortars[localId()] = record;
+      writeLocal(OFFLINE_MORTARS_KEY, mortars);
+      renderMortars(mortars);
+      return;
+    }
+
+    push(mortarsRef, record).catch(function (err) {
       errorEl.textContent = "Could not save mortar: " + err.message;
     });
   }
 
   function deleteMortar(key) {
+    if (isOffline()) {
+      const mortars = readLocal(OFFLINE_MORTARS_KEY);
+      delete mortars[key];
+      writeLocal(OFFLINE_MORTARS_KEY, mortars);
+      renderMortars(mortars);
+      return;
+    }
+
     remove(ref(db, "mortars/" + key)).catch(function (err) {
       errorEl.textContent = "Could not delete mortar: " + err.message;
     });
   }
 
   function clearAllMortars() {
+    if (isOffline()) {
+      if (confirm("Clear all saved mortar positions on this device?")) {
+        writeLocal(OFFLINE_MORTARS_KEY, {});
+        renderMortars({});
+      }
+      return;
+    }
+
     if (confirm("Clear all saved mortar positions for everyone?")) {
       remove(mortarsRef).catch(function (err) {
         errorEl.textContent = "Could not clear mortars: " + err.message;
@@ -689,25 +867,79 @@
     }
   }
 
-  // Live subscription: fires now with current data and again on any change
-  // made by anyone, so all open pages stay in sync automatically.
-  // Sorting is done in renderShots (by createdAt), so no orderByChild index
-  // is required here.
-  onValue(shotsRef, function (snapshot) {
-    console.log("[WARDOGS] Data update received:", snapshot.val());
-    renderShots(snapshot.val());
-  }, function (err) {
-    console.error("[WARDOGS] Listener error:", err);
-    errorEl.textContent = "Live sync error: " + err.message;
+  // Attaches the Firebase realtime listeners for live mode. Returns without
+  // doing anything if Firebase failed to initialize. Handles are stored so
+  // they can be detached when switching to offline mode.
+  function attachLiveListeners() {
+    if (!db) {
+      errorEl.textContent = "Live mode unavailable: Firebase did not start.";
+      return;
+    }
+
+    // onValue fires now with current data and again on any change made by
+    // anyone, so all open pages stay in sync automatically. Sorting is done
+    // in renderShots/renderMortars, so no orderByChild index is required.
+    unsubShots = onValue(shotsRef, function (snapshot) {
+      console.log("[WARDOGS] Data update received:", snapshot.val());
+      renderShots(snapshot.val());
+    }, function (err) {
+      console.error("[WARDOGS] Listener error:", err);
+      errorEl.textContent = "Live sync error: " + err.message;
+    });
+
+    unsubMortars = onValue(mortarsRef, function (snapshot) {
+      renderMortars(snapshot.val());
+    }, function (err) {
+      console.error("[WARDOGS] Mortar listener error:", err);
+      errorEl.textContent = "Live sync error: " + err.message;
+    });
+  }
+
+  // Detaches the Firebase listeners so live updates stop while offline.
+  function detachLiveListeners() {
+    if (unsubShots) {
+      unsubShots();
+      unsubShots = null;
+    }
+    if (unsubMortars) {
+      unsubMortars();
+      unsubMortars = null;
+    }
+  }
+
+  // Applies the current mode: updates the toggle UI, swaps the data source,
+  // and renders the lists for that mode.
+  function applyMode() {
+    const offline = isOffline();
+
+    // Reflect state in the switch and label styling.
+    modeSwitchEl.checked = offline;
+    labelLiveEl.classList.toggle("active-live", !offline);
+    labelOfflineEl.classList.toggle("active-offline", offline);
+
+    errorEl.textContent = "";
+
+    if (offline) {
+      // Stop live updates and render from localStorage.
+      detachLiveListeners();
+      renderShots(readLocal(OFFLINE_SHOTS_KEY));
+      renderMortars(readLocal(OFFLINE_MORTARS_KEY));
+    } else {
+      // (Re)attach live listeners; they render on their first callback.
+      detachLiveListeners();
+      attachLiveListeners();
+    }
+  }
+
+  // Toggle handler: checked = offline, unchecked = live.
+  modeSwitchEl.addEventListener("change", function () {
+    mode = modeSwitchEl.checked ? "offline" : "live";
+    localStorage.setItem(MODE_KEY, mode);
+    applyMode();
   });
 
-  // Live subscription for saved mortar positions.
-  onValue(mortarsRef, function (snapshot) {
-    renderMortars(snapshot.val());
-  }, function (err) {
-    console.error("[WARDOGS] Mortar listener error:", err);
-    errorEl.textContent = "Live sync error: " + err.message;
-  });
+  // Set up the initial mode (restored from localStorage, defaults to live).
+  applyMode();
 
   // ---- Wire up controls ----
 
@@ -725,8 +957,9 @@
     }
   });
 
-  // Initial and ongoing rendering is handled by the Firebase onValue
-  // listener above, so no manual initial render is needed here.
+  // Initial and ongoing rendering is handled by applyMode() above, which
+  // either attaches the Firebase listeners (live) or renders localStorage
+  // data (offline), so no manual initial render is needed here.
 
   // ---- PWA: register service worker so the app is installable ----
   if ("serviceWorker" in navigator) {
