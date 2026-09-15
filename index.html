@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WARDOGS Mortar Calculator</title>
+<style>
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #1e1e1e;
+    font-family: "Segoe UI", Tahoma, sans-serif;
+    color: #f0f0f0;
+  }
+
+  .card {
+    width: 500px;
+    max-width: 95vw;
+    background: #2b2b2b;
+    border-radius: 12px;
+    padding: 25px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  }
+
+  h1 {
+    text-align: center;
+    font-size: 22px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    margin: 0 0 25px;
+  }
+
+  label {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 14px;
+  }
+
+  input[type="text"] {
+    width: 100%;
+    padding: 10px;
+    font-size: 16px;
+    border: 1px solid #555;
+    border-radius: 6px;
+    background: #1e1e1e;
+    color: #f0f0f0;
+    margin-bottom: 15px;
+  }
+
+  input[type="text"]:focus {
+    outline: none;
+    border-color: #4a90d9;
+  }
+
+  .buttons {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  button {
+    padding: 10px 20px;
+    font-size: 15px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    background: #4a90d9;
+    color: white;
+  }
+
+  button.clear {
+    background: #555;
+  }
+
+  button:hover {
+    filter: brightness(1.1);
+  }
+
+  .range-title {
+    text-align: center;
+    font-size: 16px;
+    margin-top: 25px;
+  }
+
+  .range-value {
+    text-align: center;
+    font-size: 40px;
+    font-weight: bold;
+    margin: 5px 0;
+  }
+
+  .details {
+    text-align: center;
+    font-size: 14px;
+    color: #cccccc;
+  }
+
+  .error {
+    text-align: center;
+    font-size: 14px;
+    color: #e06c6c;
+    min-height: 18px;
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>WARDOGS MORTAR CALCULATOR</h1>
+
+    <label for="mortar">Mortar Position (A)</label>
+    <input type="text" id="mortar" placeholder="x93.56, y121.11" autofocus>
+
+    <label for="target">Target Position (B)</label>
+    <input type="text" id="target" placeholder="x105.20, y140.00">
+
+    <div class="buttons">
+      <button id="calc">Calculate</button>
+      <button id="clear" class="clear">Clear</button>
+    </div>
+
+    <div class="range-title">RANGE</div>
+    <div class="range-value" id="range">---</div>
+    <div class="details" id="details"></div>
+    <div class="error" id="error"></div>
+  </div>
+
+<script>
+  const mortarEl = document.getElementById("mortar");
+  const targetEl = document.getElementById("target");
+  const rangeEl = document.getElementById("range");
+  const detailsEl = document.getElementById("details");
+  const errorEl = document.getElementById("error");
+
+  function parseCoordinates(coords) {
+    const match = coords.match(
+      /\s*x\s*(-?\d+(?:\.\d+)?)\s*,?\s*y\s*(-?\d+(?:\.\d+)?)/i
+    );
+
+    if (!match) {
+      throw new Error("Use format: x93.56, y121.11");
+    }
+
+    return {
+      x: parseFloat(match[1]),
+      y: parseFloat(match[2])
+    };
+  }
+
+  function calculateDistance() {
+    try {
+      const a = parseCoordinates(mortarEl.value);
+      const b = parseCoordinates(targetEl.value);
+
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+
+      const distance = Math.hypot(dx, dy) * 100;
+
+      rangeEl.textContent = distance.toFixed(0) + " m";
+      detailsEl.textContent =
+        "\u0394X: " + dx.toFixed(2) + "    \u0394Y: " + dy.toFixed(2);
+      errorEl.textContent = "";
+    } catch (err) {
+      rangeEl.textContent = "---";
+      detailsEl.textContent = "";
+      errorEl.textContent = err.message;
+    }
+  }
+
+  function clearFields() {
+    mortarEl.value = "";
+    targetEl.value = "";
+    rangeEl.textContent = "---";
+    detailsEl.textContent = "";
+    errorEl.textContent = "";
+    mortarEl.focus();
+  }
+
+  document.getElementById("calc").addEventListener("click", calculateDistance);
+  document.getElementById("clear").addEventListener("click", clearFields);
+
+  // Pressing Enter calculates
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+      calculateDistance();
+    }
+  });
+</script>
+</body>
+</html>
