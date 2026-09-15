@@ -9,6 +9,8 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Mortar Calc">
 <link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" type="image/png" href="icon-192.png">
 <title>WARDOGS Mortar Calculator</title>
 <style>
   * {
@@ -132,6 +134,47 @@
     color: #e06c6c;
     min-height: 18px;
     margin-top: 8px;
+  }
+
+  /* ---- Saved mortar position chips ---- */
+
+  .mortar-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 15px;
+  }
+
+  .mortar-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #1e1e1e;
+    border: 1px solid #4a90d9;
+    border-radius: 20px;
+    padding: 6px 10px 6px 12px;
+    cursor: pointer;
+    font-size: 14px;
+    color: #f0f0f0;
+  }
+
+  .mortar-chip:hover {
+    background: #24374d;
+  }
+
+  .mortar-chip .chip-label {
+    font-weight: bold;
+    color: #6fb3f0;
+  }
+
+  .mortar-chip .chip-del {
+    background: transparent;
+    border: none;
+    color: #e06c6c;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 0 2px;
+    line-height: 1;
   }
 
   /* ---- Saved shots side panel ---- */
@@ -299,6 +342,13 @@
     <label for="mortar">Mortar Position (A)</label>
     <input type="text" id="mortar" placeholder="x93.56, y121.11" autofocus>
 
+    <div class="buttons">
+      <button id="saveMortar" class="save">Save Mortar</button>
+      <button id="clearMortars" class="clear">Clear Mortars</button>
+    </div>
+
+    <div class="mortar-chips" id="mortarList"></div>
+
     <label for="target">Target Position (B)</label>
     <input type="text" id="target" placeholder="x105.20, y140.00">
 
@@ -353,11 +403,12 @@
 
   console.log("[WARDOGS] Script started, initializing Firebase...");
 
-  let app, db, shotsRef;
+  let app, db, shotsRef, mortarsRef;
   try {
     app = initializeApp(firebaseConfig);
     db = getDatabase(app);
     shotsRef = ref(db, "shots");
+    mortarsRef = ref(db, "mortars");
     console.log("[WARDOGS] Firebase initialized OK");
   } catch (e) {
     console.error("[WARDOGS] Firebase init FAILED:", e);
@@ -371,6 +422,7 @@
   const detailsEl = document.getElementById("details");
   const errorEl = document.getElementById("error");
   const shotListEl = document.getElementById("shotList");
+  const mortarListEl = document.getElementById("mortarList");
 
   // Holds the most recent successful calculation so "Save Shot" can use it.
   let lastResult = null;
@@ -552,6 +604,91 @@
     }
   }
 
+  // ---- Saved mortar positions (shared via Firebase) ----
+
+  // Renders numbered chips (1, 2, 3...) from a Firebase snapshot. Clicking a
+  // chip loads only the mortar field; the target is left untouched.
+  function renderMortars(mortarsObj) {
+    mortarListEl.innerHTML = "";
+
+    const keys = mortarsObj ? Object.keys(mortarsObj) : [];
+    if (keys.length === 0) {
+      return;
+    }
+
+    // Oldest first so the numbering (1, 2, 3...) stays stable as new ones
+    // are added.
+    keys.sort(function (a, b) {
+      return (mortarsObj[a].createdAt || 0) - (mortarsObj[b].createdAt || 0);
+    });
+
+    keys.forEach(function (key, index) {
+      const mortar = mortarsObj[key];
+
+      const chip = document.createElement("div");
+      chip.className = "mortar-chip";
+      chip.title = mortar.position;
+
+      const label = document.createElement("span");
+      label.className = "chip-label";
+      label.textContent = index + 1;
+
+      const del = document.createElement("button");
+      del.className = "chip-del";
+      del.textContent = "\u2715";
+      del.title = "Delete this mortar position";
+      del.addEventListener("click", function (e) {
+        e.stopPropagation();
+        deleteMortar(key);
+      });
+
+      chip.appendChild(label);
+      chip.appendChild(del);
+
+      // Clicking the chip loads only the mortar position and recalculates.
+      chip.addEventListener("click", function () {
+        mortarEl.value = mortar.position;
+        calculateDistance();
+      });
+
+      mortarListEl.appendChild(chip);
+    });
+  }
+
+  function saveCurrentMortar() {
+    let position;
+    try {
+      parseCoordinates(mortarEl.value);
+      position = mortarEl.value.trim();
+    } catch (err) {
+      errorEl.textContent = "Enter a valid mortar position to save. " + err.message;
+      return;
+    }
+
+    errorEl.textContent = "";
+
+    push(mortarsRef, {
+      position: position,
+      createdAt: Date.now()
+    }).catch(function (err) {
+      errorEl.textContent = "Could not save mortar: " + err.message;
+    });
+  }
+
+  function deleteMortar(key) {
+    remove(ref(db, "mortars/" + key)).catch(function (err) {
+      errorEl.textContent = "Could not delete mortar: " + err.message;
+    });
+  }
+
+  function clearAllMortars() {
+    if (confirm("Clear all saved mortar positions for everyone?")) {
+      remove(mortarsRef).catch(function (err) {
+        errorEl.textContent = "Could not clear mortars: " + err.message;
+      });
+    }
+  }
+
   // Live subscription: fires now with current data and again on any change
   // made by anyone, so all open pages stay in sync automatically.
   // Sorting is done in renderShots (by createdAt), so no orderByChild index
@@ -564,12 +701,22 @@
     errorEl.textContent = "Live sync error: " + err.message;
   });
 
+  // Live subscription for saved mortar positions.
+  onValue(mortarsRef, function (snapshot) {
+    renderMortars(snapshot.val());
+  }, function (err) {
+    console.error("[WARDOGS] Mortar listener error:", err);
+    errorEl.textContent = "Live sync error: " + err.message;
+  });
+
   // ---- Wire up controls ----
 
   document.getElementById("calc").addEventListener("click", calculateDistance);
   document.getElementById("save").addEventListener("click", saveCurrentShot);
   document.getElementById("clear").addEventListener("click", clearFields);
   document.getElementById("clearAll").addEventListener("click", clearAllShots);
+  document.getElementById("saveMortar").addEventListener("click", saveCurrentMortar);
+  document.getElementById("clearMortars").addEventListener("click", clearAllMortars);
 
   // Pressing Enter calculates.
   document.addEventListener("keydown", function (e) {
